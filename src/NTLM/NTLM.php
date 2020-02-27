@@ -1,4 +1,4 @@
-<?php namespace NTLM\NTLM
+<?php namespace davelip\NTLM
 
 use Psr\Log\LoggerInterface;
 
