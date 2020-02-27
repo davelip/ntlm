@@ -1,0 +1,19 @@
+{
+    "name": "davelip/ntlm",
+    "description": "NTLM integration for PHP projects",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["authentication", "NTLM", "windows", "single sign on", "sso"],
+    "authors": [
+        {
+            "name": "David Lippi",
+            "email": "lippi.david@gmail.com"
+        }
+    ],
+    "prefer-stable": true,
+    "minimum-stability": "dev",
+    "require": {
+        "psr/log": "^1.1",
+        "php": ">=7.3.0"
+    }
+}
