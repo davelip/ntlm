@@ -10,11 +10,6 @@
             "email": "lippi.david@gmail.com"
         }
     ],
-    "autoload": {
-        "psr-4": {
-            "davelip\\NTLM\\": "davelip/NTLM/"
-        }
-    },
     "prefer-stable": true,
     "minimum-stability": "dev",
     "require": {
