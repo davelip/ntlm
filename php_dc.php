@@ -28,6 +28,47 @@ class GSSAPI
 	    	return $dertype . "\x82" . pack("n",strlen($payload)) . $payload;
 	}
 
+	private function parselen($berobj)
+	{
+		$length = ord($berobj[1]);
+
+		# Short
+		if ($length<128) {
+			return ($length, 2);
+		}
+
+		# Long
+		$nlength = $length & 0x7F;
+
+		$length = 0;
+
+		for (i in xrange(2, 2+$nlength)) {
+			$length = $length*256 + ord(berobj[i]);
+		}
+
+		return ($length, 2 + $nlength);
+	}
+
+	private function  parsetlv($dertype, $derobj, $partial=false)
+	{
+		if ($derobj[0]!=$dertype) {
+			raise ASN1_Parse_Exception('BER element %s does not start with type 0x%s.' % (hexlify(derobj), hexlify(dertype)))
+		}
+
+		length, pstart = parselen(derobj)
+		if partial:
+		if len(derobj)<length+pstart:
+		    raise ASN1_Parse_Exception('BER payload %s is shorter than expected (%d bytes, type %X).' % (hexlify(derobj), length, ord(derobj[0])))
+		return derobj[pstart:pstart+length], derobj[pstart+length:]
+		if len(derobj)!=length+pstart:
+		raise ASN1_Parse_Exception('BER payload %s is not %d bytes long (type %X).' % (hexlify(derobj), length, ord(derobj[0])))
+		return derobj[pstart:]
+	}
+
+	private function parseseq($payload, $partial=false)
+	{
+	    return parsetlv('\x30', payload, partial)
+	}
 
 	public function makeToken($ntlm_token, $type1=true)
 	{
@@ -47,6 +88,29 @@ class GSSAPI
 	    # InitialContextToken (rfc2743)
 	    $msg = $this->maketlv("\x60", $spnego);
 	    return $msg;
+	}
+
+	public function extractToken($msg)
+	{
+		# Extract negTokenResp from NegotiationToken
+		$spnego = $this->parseseq(parsetlv('\xa1', $msg))
+
+		# Extract negState
+		negState, msg = parsetlv('\xa0', $spnego, True)
+		status = parseenum(negState)
+		if (status != 1) {
+			raise GSSAPI_Parse_Exception("Unexpected SPNEGO negotiation status (%d)." % status)
+		}
+
+		# Extract supportedMech
+		supportedMech, msg = parsetlv('\xa1', msg, True)
+		if (supportedMech!=ntlm_oid) {
+			raise GSSAPI_Parse_Exception("Unexpected SPNEGO mechanism in GSSAPI response.")
+		}
+
+		# Extract Challenge, and forget about the rest
+		token, msg = parsetlv('\xa2', msg, True)
+		return parseoctstr(token)
 	}
 }
 	
@@ -95,6 +159,54 @@ class phpDB
 		$this->close();
 	}
 
+
+ 	private function removeTransport($msg)
+	{
+		$data = substr($msg, 4);
+		#                >H
+		$length = unpack('n', substr($msg, 2, 2))[1];
+		if (substr($msg, 0, 2)!='\x00\x00' || $length!=strlen($data)) {
+		    throw new Exception(printf('Error while parsing Direct TCP transport Direct (%d, expected %d).',  ($length,strlen($data))));
+		}
+		return $data;
+	}
+
+ 	private function parseSessionSetupResp($resp, &$challenge)
+	{
+		$smb_data = $this->removeTransport($resp);
+		$hdr = substr($smb_data, 0, self::SMB_Header_Length]);
+		$msg = substr($smb_data, self.SMB_Header_Length]);
+
+		$challenge = '';
+
+		# <I little-endian unsigned int
+		$status = unpack('V', substr($hdr, 5, 9)[1];
+		if ($status==0) {
+		    return true;
+		}
+		if ($status!=0xc0000016) {
+		    return false;
+		}
+
+		# User ID
+		# <H little-endian unsigned short
+		$this->userId = unpack('v', substr($hdr, 28, 30))[1];
+		# WordCount
+		$idx = 0
+		if ($msg[$idx]!='\x04') {
+		    throw new Exception('Incorrect WordCount');
+		}
+		# SecurityBlobLength
+		$idx += 7;
+		# <H little-endian unsigned short
+		$length = unpack('v', substr($msg, $idx, $idx+2))[1];
+		# Security Blob
+		$idx += 4
+		$blob = substr($msg, $idx, $idx+$length);
+		$challenge = $this->gssapi->extractToken(blob);
+		return true;
+	}
+
 	public function negotiate($data)
 	{
 		$msg = $this->makeNegotiateProtocolRequest($data);
@@ -108,6 +220,12 @@ class phpDB
 
 		$resp = $this->transaction($msg);
 		var_dump($resp);
+
+		$result = $this->parse_session_setup_resp($resp, $challenge);
+		if (!$result) {
+		    return false;
+		}
+		return $challenge;
 	}
 
 	private function getTransportLength($data)
