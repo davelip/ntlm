@@ -28,89 +28,145 @@ class GSSAPI
 	    	return $dertype . "\x82" . pack("n",strlen($payload)) . $payload;
 	}
 
+	private function xrange($start, $limit, $step = 1) {
+		if ($start <= $limit) {
+			if ($step <= 0) {
+				throw new LogicException('Step must be positive');
+			}
+
+			for ($i = $start; $i <= $limit; $i += $step) {
+				yield $i;
+			}
+		} else {
+			if ($step >= 0) {
+				throw new LogicException('Step must be negative');
+			}
+
+			for ($i = $start; $i >= $limit; $i += $step) {
+				yield $i;
+			}
+		}
+	}
+
 	private function parselen($berobj)
 	{
-		$length = ord($berobj[1]);
+		$length = ord(substr($berobj, 1, 1));
+var_dump(ord(substr($berobj, 1,1)));
+var_dump($length);
 
 		# Short
 		if ($length<128) {
-			return ($length, 2);
+			return [$length, 2];
 		}
 
 		# Long
 		$nlength = $length & 0x7F;
+var_dump($nlength);
 
 		$length = 0;
 
-		for (i in xrange(2, 2+$nlength)) {
-			$length = $length*256 + ord(berobj[i]);
+		foreach ($this->xrange(2, 2+$nlength) as $i) {
+var_dump($i);
+var_dump($length);
+var_dump(ord(substr($berobj, $i, 1)));
+			$length = $length*256 + ord(substr($berobj, $i, 1));
 		}
 
-		return ($length, 2 + $nlength);
+var_dump($length);
+var_dump(2+$nlength);
+die();
+		return [$length, 2 + $nlength];
 	}
 
 	private function  parsetlv($dertype, $derobj, $partial=false)
 	{
-		if ($derobj[0]!=$dertype) {
-			raise ASN1_Parse_Exception('BER element %s does not start with type 0x%s.' % (hexlify(derobj), hexlify(dertype)))
+		if (substr($derobj, 0, 1)!=$dertype) {
+			throw new Exception(printf('BER element %s does not start with type 0x%s.', bin2hex($derobj), bin2hex($dertype)));
 		}
 
-		length, pstart = parselen(derobj)
-		if partial:
-		if len(derobj)<length+pstart:
-		    raise ASN1_Parse_Exception('BER payload %s is shorter than expected (%d bytes, type %X).' % (hexlify(derobj), length, ord(derobj[0])))
-		return derobj[pstart:pstart+length], derobj[pstart+length:]
-		if len(derobj)!=length+pstart:
-		raise ASN1_Parse_Exception('BER payload %s is not %d bytes long (type %X).' % (hexlify(derobj), length, ord(derobj[0])))
-		return derobj[pstart:]
+		$aOut = $this->parselen($derobj);
+		$length = $aOut[0];
+		$pstart = $aOut[1];
+var_dump(printf("length %d pstart %d", $length, $pstart));
+
+		if ($partial) {
+			if (strlen($derobj)<$length+$pstart) {
+			    throw new Exception(printf('BER payload %s is shorter than expected (%d bytes, type %X).', bin2hex($derobj), $length, ord($derobj[0])));
+			}
+			return [substr($derobj, $pstart, $pstart+$length), substr($derobj, $pstart+$length)];
+		}
+		if (strlen($derobj)!=($length+$pstart)) {
+			throw new Exception(printf('BER payload %s is not %d bytes long (type %X).', bin2hex($derobj), $length, ord($derobj[0])));
+		}
+		return substr($derobj, $pstart);
 	}
 
 	private function parseseq($payload, $partial=false)
 	{
-	    return parsetlv('\x30', payload, partial)
+	    	return $this->parsetlv("\x30", $payload, $partial);
 	}
 
 	public function makeToken($ntlm_token, $type1=true)
 	{
-	    # NegTokenInit (rfc4178)
-	    $mechlist = $this->makeseq($this->ntlm_oid);
-	    $mechTypes = $this->maketlv("\xa0", $mechlist);
-	    $mechToken = $this->maketlv("\xa2", $this->makeoctstr($ntlm_token));
+		if (! $type1) {
+		$mechToken = $this->maketlv("\xa2", $this->makeoctstr($ntlm_token));
+		$negTokenResp = $this->maketlv("\xa1", $this->makeseq($mechToken));
+		return $negTokenResp;
+		}
 
-	    # NegotiationToken (rfc4178)
-	    $negTokenInit = $this->makeseq($mechTypes . $mechToken ); # + mechListMIC)
-	    $innerContextToken = $this->maketlv("\xa0", $negTokenInit);
+		# NegTokenInit (rfc4178)
+		$mechlist = $this->makeseq($this->ntlm_oid);
+		#var_dump(base64_encode($mechlist)); # VERIFIED
+		$mechTypes = $this->maketlv("\xa0", $mechlist);
+		#var_dump(base64_encode($mechTypes)); # VERIFIED
+		$mechToken = $this->maketlv("\xa2", $this->makeoctstr($ntlm_token));
+		#var_dump(base64_encode($mechToken)); #VERIFIED
 
-	    # MechType + innerContextToken (rfc2743)
-	    $thisMech = "\x06\x06\x2b\x06\x01\x05\x05\x02"; # SPNEGO OID 1.3.6.1.5.5.2
-	    $spnego = $thisMech . $innerContextToken;
+		# NegotiationToken (rfc4178)
+		$negTokenInit = $this->makeseq($mechTypes . $mechToken ); # + mechListMIC)
+		#var_dump(base64_encode($negTokenInit));#VERIFIED
+		$innerContextToken = $this->maketlv("\xa0", $negTokenInit);
+		#var_dump(base64_encode($innerContextToken));#VERIFIED
 
-	    # InitialContextToken (rfc2743)
-	    $msg = $this->maketlv("\x60", $spnego);
-	    return $msg;
+		# MechType + innerContextToken (rfc2743)
+		$thisMech = "\x06\x06\x2b\x06\x01\x05\x05\x02"; # SPNEGO OID 1.3.6.1.5.5.2
+		#var_dump(base64_encode($thisMech));#VERIFIED
+		$spnego = $thisMech . $innerContextToken;
+		#var_dump(base64_encode($spnego));#VERIFIED
+
+		# InitialContextToken (rfc2743)
+		$msg = $this->maketlv("\x60", $spnego);
+		#var_dump(base64_encode($msg));#VERIFIED
+		return $msg;
 	}
 
 	public function extractToken($msg)
 	{
 		# Extract negTokenResp from NegotiationToken
-		$spnego = $this->parseseq(parsetlv('\xa1', $msg))
+		$spnego = $this->parseseq($this->parsetlv("\xa1", $msg));
 
 		# Extract negState
-		negState, msg = parsetlv('\xa0', $spnego, True)
-		status = parseenum(negState)
-		if (status != 1) {
-			raise GSSAPI_Parse_Exception("Unexpected SPNEGO negotiation status (%d)." % status)
+		$aOut = $this->parsetlv("\xa0", $spnego, True);
+		$negState = $aOut[0];
+		$msg = $aOut[1];
+		$status = $this->parseenum($negState);
+		if ($status != 1) {
+			throw new Exception(printf("Unexpected SPNEGO negotiation status (%d).", $status));
 		}
 
 		# Extract supportedMech
-		supportedMech, msg = parsetlv('\xa1', msg, True)
-		if (supportedMech!=ntlm_oid) {
-			raise GSSAPI_Parse_Exception("Unexpected SPNEGO mechanism in GSSAPI response.")
+		$aOut = $this->parsetlv("\xa1", $msg, True);
+		$supportedMech = $aOut[0];
+		$msg = $aOut[1];
+		if ($supportedMech!=$ntlm_oid) {
+			throw new Exception("Unexpected SPNEGO mechanism in GSSAPI response.");
 		}
 
 		# Extract Challenge, and forget about the rest
-		token, msg = parsetlv('\xa2', msg, True)
-		return parseoctstr(token)
+		$aOut = $this->parsetlv("\xa2", $msg, True);
+		$token = $aOut[0];
+		$msg = $aOut[1];
+		return $this->parseoctstr($token);
 	}
 }
 	
@@ -165,35 +221,33 @@ class phpDB
 		$data = substr($msg, 4);
 		#                >H
 		$length = unpack('n', substr($msg, 2, 2))[1];
-		if (substr($msg, 0, 2)!='\x00\x00' || $length!=strlen($data)) {
-		    throw new Exception(printf('Error while parsing Direct TCP transport Direct (%d, expected %d).',  ($length,strlen($data))));
+		if (substr($msg, 0, 2)!="\x00\x00" || $length!=strlen($data)) {
+		    throw new Exception(printf('Error while parsing Direct TCP transport Direct (%d, expected %d).', $length, strlen($data)));
 		}
 		return $data;
 	}
 
- 	private function parseSessionSetupResp($resp, &$challenge)
+ 	private function parseSessionSetupResp($resp)
 	{
 		$smb_data = $this->removeTransport($resp);
-		$hdr = substr($smb_data, 0, self::SMB_Header_Length]);
-		$msg = substr($smb_data, self.SMB_Header_Length]);
-
-		$challenge = '';
+		$hdr = substr($smb_data, 0, self::SMB_Header_Length);
+		$msg = substr($smb_data, self::SMB_Header_Length);
 
 		# <I little-endian unsigned int
-		$status = unpack('V', substr($hdr, 5, 9)[1];
+		$status = unpack('V', substr($hdr, 5, 9))[1];
 		if ($status==0) {
-		    return true;
+		    return [true, ''];
 		}
 		if ($status!=0xc0000016) {
-		    return false;
+		    return [false, ''];
 		}
 
 		# User ID
 		# <H little-endian unsigned short
 		$this->userId = unpack('v', substr($hdr, 28, 30))[1];
 		# WordCount
-		$idx = 0
-		if ($msg[$idx]!='\x04') {
+		$idx = 0;
+		if ($msg[$idx]!="\x04") {
 		    throw new Exception('Incorrect WordCount');
 		}
 		# SecurityBlobLength
@@ -201,31 +255,37 @@ class phpDB
 		# <H little-endian unsigned short
 		$length = unpack('v', substr($msg, $idx, $idx+2))[1];
 		# Security Blob
-		$idx += 4
+		$idx += 4;
 		$blob = substr($msg, $idx, $idx+$length);
-		$challenge = $this->gssapi->extractToken(blob);
-		return true;
+		$aRv =  [true, $this->gssapi->extractToken($blob)];
+		return $aRv;
 	}
 
 	public function negotiate($data)
 	{
-		$msg = $this->makeNegotiateProtocolRequest($data);
-		//var_dump(base64_encode($msg));
+		$msg = $this->makeNegotiateProtocolRequest();
+		#var_dump(base64_encode($msg)); #VERIFIED
+		if ($msg) {
+			$msg = $this->transaction($msg);
+			#var_dump(base64_encode($msg)); #VERIFIED
+			// TODO
+			//$this->parseNegotiateProtocolResp($msg);
+		}
 
-		$resp = $this->transaction($msg);
-		//var_dump($resp);
-
+		#var_dump(base64_encode($data)); #VERIFIED
 		$msg = $this->makeSessionSetupRequest($data, true);
-		//var_dump(base64_encode($msg));
+		#var_dump(base64_encode($msg)); #VERIFIED
 
 		$resp = $this->transaction($msg);
-		var_dump($resp);
+		var_dump(base64_encode($resp));
 
-		$result = $this->parse_session_setup_resp($resp, $challenge);
-		if (!$result) {
+		$aOut = $this->parseSessionSetupResp($resp);
+var_dump($aOut);
+die();
+		if (!$aOut[0]) {
 		    return false;
 		}
-		return $challenge;
+		return $aOut[1];
 	}
 
 	private function getTransportLength($data)
@@ -284,11 +344,13 @@ class phpDB
 	}
 	private function makeSessionSetupRequest($ntlm_token, $type1=true)
 	{
-        	$this->userId = 0;
+        	//$this->userId = 0;
 		$hdr = $this->createSMBHeader(self::SMB_COM_SESSION_SETUP_ANDX);
+		#var_Dump(base64_encode($hdr)); # VERIFIED
 
 		# Start building SMB_Data, excluding ByteCount
-		$data = $this->gssapi->makeToken($ntlm_token, $type1);
+		$data = $this->gssapi->makeToken($ntlm_token, $type1); 
+		#var_dump(base64_encode($data)); #VERIFIED
 
 		# See 2.2.4.53.1 in MS-CIFS and 2.2.4.6.1 in MS-SMB
 		$params = "\x0C\xFF\x00";             # WordCount, AndXCommand, AndXReserved
@@ -306,15 +368,20 @@ class phpDB
 		      self::CAP_NT_SMBS  |
 		      self::CAP_STATUS32 |
 		      self::CAP_EXTENDED_SECURITY);
+		#var_Dump(base64_encode($params)); # VERIFIED
 		
 		if ((strlen($data)+strlen($params))%2==1) {
 			$data .= "\x00";
 		}
-		$data .= iconv("UTF-8", "UTF-16", "PHP\0");  # NativeOS
-		$data .= iconv("UTF-8", "UTF-16", "PHP\0");  # NativeLanMan
+		$data .= iconv("UTF-8", "UTF-16LE", "Python\0");  # NativeOS
+		$data .= iconv("UTF-8", "UTF-16LE", "Python\0");  # NativeLanMan
+		#var_Dump(base64_encode($data)); #VERIFIED
+		#var_Dump(strlen($data)); #VERIFIED
 
 		# "<H" little endian unsigned short
-		return $this->addTransport($hdr.$params.pack("v", strlen($data)).$data);
+		$rv = $this->addTransport($hdr.$params.pack("v", strlen($data)).$data);
+		#var_Dump(base64_encode($rv));#VERIFIED
+		return $rv;
 	}
 
 
