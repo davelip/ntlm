@@ -34,7 +34,7 @@ class GSSAPI
 				throw new LogicException('Step must be positive');
 			}
 
-			for ($i = $start; $i <= $limit; $i += $step) {
+			for ($i = $start; $i < $limit; $i += $step) {
 				yield $i;
 			}
 		} else {
@@ -50,9 +50,12 @@ class GSSAPI
 
 	private function parselen($berobj)
 	{
+var_dump(__METHOD__);
+var_dump(base64_encode($berobj));
+var_dump('strlen ' . strlen($berobj) . "\n");
 		$length = ord(substr($berobj, 1, 1));
-var_dump(ord(substr($berobj, 1,1)));
-var_dump($length);
+var_dump("ord " . ord(substr($berobj, 1,1)) . "\n");
+var_dump("length " . $length . "\n");
 
 		# Short
 		if ($length<128) {
@@ -61,25 +64,25 @@ var_dump($length);
 
 		# Long
 		$nlength = $length & 0x7F;
-var_dump($nlength);
+var_dump("nlength " . $nlength . "\n");
 
 		$length = 0;
 
 		foreach ($this->xrange(2, 2+$nlength) as $i) {
-var_dump($i);
-var_dump($length);
-var_dump(ord(substr($berobj, $i, 1)));
+var_dump('i ' . $i . "\n");
+var_dump("length " . $length . "\n");
+var_dump("ord " . ord(substr($berobj, $i, 1)) . "\n");
 			$length = $length*256 + ord(substr($berobj, $i, 1));
 		}
 
-var_dump($length);
-var_dump(2+$nlength);
-die();
-		return [$length, 2 + $nlength];
+var_dump("length " . $length . "\n");
+var_dump("nlength " . (2+$nlength) . "\n");
+		return [$length, (2 + $nlength)];
 	}
 
 	private function  parsetlv($dertype, $derobj, $partial=false)
 	{
+var_dump(__METHOD__);
 		if (substr($derobj, 0, 1)!=$dertype) {
 			throw new Exception(printf('BER element %s does not start with type 0x%s.', bin2hex($derobj), bin2hex($dertype)));
 		}
@@ -87,7 +90,12 @@ die();
 		$aOut = $this->parselen($derobj);
 		$length = $aOut[0];
 		$pstart = $aOut[1];
+
 var_dump(printf("length %d pstart %d", $length, $pstart));
+
+if (strlen($derobj)!=($length+$pstart)) {
+	die('errore');
+}
 
 		if ($partial) {
 			if (strlen($derobj)<$length+$pstart) {
@@ -101,13 +109,21 @@ var_dump(printf("length %d pstart %d", $length, $pstart));
 		return substr($derobj, $pstart);
 	}
 
+	private function parseoctstr($payload, $partial=false)
+	{
+var_dump(__METHOD__);
+		return $this->parsetlv("\04", $payload, $partial);
+	}
+
 	private function parseseq($payload, $partial=false)
 	{
+var_dump(__METHOD__);
 	    	return $this->parsetlv("\x30", $payload, $partial);
 	}
 
 	public function makeToken($ntlm_token, $type1=true)
 	{
+var_dump(__METHOD__);
 		if (! $type1) {
 		$mechToken = $this->maketlv("\xa2", $this->makeoctstr($ntlm_token));
 		$negTokenResp = $this->maketlv("\xa1", $this->makeseq($mechToken));
@@ -142,8 +158,9 @@ var_dump(printf("length %d pstart %d", $length, $pstart));
 
 	public function extractToken($msg)
 	{
+var_dump(__METHOD__);
 		# Extract negTokenResp from NegotiationToken
-		$spnego = $this->parseseq($this->parsetlv("\xa1", $msg));
+		$spnego = $this->parseseq($this->parsetlv("\xa1", $msg, false));
 
 		# Extract negState
 		$aOut = $this->parsetlv("\xa0", $spnego, True);
@@ -229,6 +246,7 @@ class phpDB
 
  	private function parseSessionSetupResp($resp)
 	{
+var_dump(__METHOD__);
 		$smb_data = $this->removeTransport($resp);
 		$hdr = substr($smb_data, 0, self::SMB_Header_Length);
 		$msg = substr($smb_data, self::SMB_Header_Length);
@@ -245,6 +263,7 @@ class phpDB
 		# User ID
 		# <H little-endian unsigned short
 		$this->userId = unpack('v', substr($hdr, 28, 30))[1];
+#var_dump('userId ' . $this->userId); #VERIFIED
 		# WordCount
 		$idx = 0;
 		if ($msg[$idx]!="\x04") {
@@ -254,9 +273,13 @@ class phpDB
 		$idx += 7;
 		# <H little-endian unsigned short
 		$length = unpack('v', substr($msg, $idx, $idx+2))[1];
+#var_dump('length ' . $length); #VERIFIED
 		# Security Blob
 		$idx += 4;
+var_dump('idx ' . $idx);
+var_dump('idx+length ' . ($idx+$length));
 		$blob = substr($msg, $idx, $idx+$length);
+var_dump('blob ' . base64_encode($blob));
 		$aRv =  [true, $this->gssapi->extractToken($blob)];
 		return $aRv;
 	}
@@ -278,8 +301,10 @@ class phpDB
 
 		$resp = $this->transaction($msg);
 		var_dump(base64_encode($resp));
+die();
 
 		$aOut = $this->parseSessionSetupResp($resp);
+var_dump('aOut');
 var_dump($aOut);
 die();
 		if (!$aOut[0]) {
@@ -290,7 +315,8 @@ die();
 
 	private function getTransportLength($data)
 	{
-		return unpack("S", substr($data, 2, 2))[1];
+		#              >H
+		return unpack("n", substr($data, 2, 2))[1];
 	}
 
 	public function transaction($msg)
@@ -301,8 +327,12 @@ die();
 		}
 		$sent = socket_send($this->socket, $msg, strlen($msg), 0);
 		$data = socket_read($this->socket, 4);
+var_dump('transaction ' . base64_encode($data));
 		if ($data!==false) {
-			$data .= socket_read($this->socket, $this->getTransportLength($data));
+			$length = $this->getTransportLength($data);
+var_dump('getTransportLength ' . $length);
+			$data .= socket_read($this->socket, $length);
+var_dump('transaction ' . base64_encode($data));
 		}
 		return $data;
 	}
@@ -397,14 +427,19 @@ var_dump(pack("I", "\x00"));
 var_dump(base64_encode(pack("L", "\x00")));
 */
 
-
 // NTLM specs http://davenport.sourceforge.net/ntlm.html
-if (empty($_SERVER["REDIRECT_HTTP_AUTHORIZATION"])){
+if (empty($_SERVER["HTTP_AUTHORIZATION"]) && empty($_SERVER["REDIRECT_HTTP_AUTHORIZATION"])){
 	header("HTTP/1.1 401 Unauthorized");
 	header("WWW-Authenticate: NTLM");
 	exit;
 }
-$auth = $_SERVER["REDIRECT_HTTP_AUTHORIZATION"];
+
+if (!empty($_SERVER["REDIRECT_HTTP_AUTHORIZATION"])){
+	$auth = $_SERVER["REDIRECT_HTTP_AUTHORIZATION"];
+} else {
+	$auth = $_SERVER["HTTP_AUTHORIZATION"];
+}
+
 if (substr($auth,0,5) == "NTLM ") {
 	$msg = base64_decode(substr($auth, 5));
 	if (substr($msg, 0, 8) != "NTLMSSP\x00") {
