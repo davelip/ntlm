@@ -42,7 +42,7 @@ class GSSAPI
 				throw new LogicException('Step must be negative');
 			}
 
-			for ($i = $start; $i >= $limit; $i += $step) {
+			for ($i = $start; $i > $limit; $i += $step) {
 				yield $i;
 			}
 		}
@@ -52,13 +52,13 @@ class GSSAPI
 	{
 var_dump(__METHOD__);
 var_dump(base64_encode($berobj));
-var_dump('strlen ' . strlen($berobj) . "\n");
 		$length = ord(substr($berobj, 1, 1));
-var_dump("ord " . ord(substr($berobj, 1,1)) . "\n");
+var_dump("ord " . ord(substr($berobj, 1, 1)) . "\n");
 var_dump("length " . $length . "\n");
 
 		# Short
 		if ($length<128) {
+var_dump("parselen esco con length " . $length . "\n");
 			return [$length, 2];
 		}
 
@@ -68,15 +68,16 @@ var_dump("nlength " . $nlength . "\n");
 
 		$length = 0;
 
-		foreach ($this->xrange(2, 2+$nlength) as $i) {
-var_dump('i ' . $i . "\n");
-var_dump("length " . $length . "\n");
-var_dump("ord " . ord(substr($berobj, $i, 1)) . "\n");
+		$generator = $this->xrange(2, 2+$nlength);
+		foreach ($generator as $i) {
+//var_dump('i ' . $i . "\n");
+//var_dump("ord " . ord(substr($berobj, $i, 1)) . "\n");
 			$length = $length*256 + ord(substr($berobj, $i, 1));
+//var_dump("length " . $length . "\n");
 		}
 
 var_dump("length " . $length . "\n");
-var_dump("nlength " . (2+$nlength) . "\n");
+var_dump("nlength " . $nlength . "\n");
 		return [$length, (2 + $nlength)];
 	}
 
@@ -92,10 +93,8 @@ var_dump(__METHOD__);
 		$pstart = $aOut[1];
 
 var_dump(printf("length %d pstart %d", $length, $pstart));
+var_dump($partial);
 
-if (strlen($derobj)!=($length+$pstart)) {
-	die('errore');
-}
 
 		if ($partial) {
 			if (strlen($derobj)<$length+$pstart) {
@@ -112,8 +111,42 @@ if (strlen($derobj)!=($length+$pstart)) {
 	private function parseoctstr($payload, $partial=false)
 	{
 var_dump(__METHOD__);
-		return $this->parsetlv("\04", $payload, $partial);
+		return $this->parsetlv("\x04", $payload, $partial);
 	}
+
+	private function parseint($payload, $partial=false, $tag="\x02")
+	{
+var_dump(__METHOD__);
+	    	$res = $this->parsetlv($tag, $payload, $partial);
+	    	if ($partial) {
+			$payload = $res[0];
+		} else {
+			$payload = $res;
+		}
+		$value = 0;
+		
+		// TODO
+	    	//assert (ord(payload[0]) & 0x80) == 0x00
+
+		$generator = $this->xrange(0, strlen($payload));
+		foreach ($generator as $i) {
+			$value = $value*256 + ord(substr($payload, $i, 1));
+		}
+
+	    	if ($partial) {
+			return [$value, $res[1]];
+		} else {
+			return $value;
+		}
+	}
+
+
+	private function parseenum($payload, $partial=false)
+	{
+var_dump(__METHOD__);
+	    	return $this->parseint($payload, $partial, "\x0A");
+	}
+
 
 	private function parseseq($payload, $partial=false)
 	{
@@ -160,7 +193,12 @@ var_dump(__METHOD__);
 	{
 var_dump(__METHOD__);
 		# Extract negTokenResp from NegotiationToken
-		$spnego = $this->parseseq($this->parsetlv("\xa1", $msg, false));
+var_dump(base64_encode($msg));
+		$msg = $this->parsetlv("\xa1", $msg, false);
+var_dump(base64_encode($msg));
+		$spnego = $this->parseseq($msg);
+var_dump("spnego");
+var_dump(base64_encode($spnego));
 
 		# Extract negState
 		$aOut = $this->parsetlv("\xa0", $spnego, True);
@@ -248,11 +286,14 @@ class phpDB
 	{
 var_dump(__METHOD__);
 		$smb_data = $this->removeTransport($resp);
+var_dump('smb_data ' . base64_encode($smb_data)); 
 		$hdr = substr($smb_data, 0, self::SMB_Header_Length);
+var_dump('hdr ' . base64_encode($hdr));
 		$msg = substr($smb_data, self::SMB_Header_Length);
+var_dump('msg ' . base64_encode($msg));
 
 		# <I little-endian unsigned int
-		$status = unpack('V', substr($hdr, 5, 9))[1];
+		$status = unpack('V', substr($hdr, 5, 4))[1];
 		if ($status==0) {
 		    return [true, ''];
 		}
@@ -262,8 +303,8 @@ var_dump(__METHOD__);
 
 		# User ID
 		# <H little-endian unsigned short
-		$this->userId = unpack('v', substr($hdr, 28, 30))[1];
-#var_dump('userId ' . $this->userId); #VERIFIED
+		$this->userId = unpack('v', substr($hdr, 28, 2))[1];
+var_dump('userId ' . $this->userId); #VERIFIED
 		# WordCount
 		$idx = 0;
 		if ($msg[$idx]!="\x04") {
@@ -272,15 +313,16 @@ var_dump(__METHOD__);
 		# SecurityBlobLength
 		$idx += 7;
 		# <H little-endian unsigned short
-		$length = unpack('v', substr($msg, $idx, $idx+2))[1];
-#var_dump('length ' . $length); #VERIFIED
+		$length = unpack('v', substr($msg, $idx, 2))[1];
+var_dump('length ' . $length); #VERIFIED
 		# Security Blob
 		$idx += 4;
 var_dump('idx ' . $idx);
 var_dump('idx+length ' . ($idx+$length));
-		$blob = substr($msg, $idx, $idx+$length);
+		$blob = substr($msg, $idx, $length);
 var_dump('blob ' . base64_encode($blob));
 		$aRv =  [true, $this->gssapi->extractToken($blob)];
+var_dump('token ' . base64_encode($aRv));
 		return $aRv;
 	}
 
@@ -300,8 +342,7 @@ var_dump('blob ' . base64_encode($blob));
 		#var_dump(base64_encode($msg)); #VERIFIED
 
 		$resp = $this->transaction($msg);
-		var_dump(base64_encode($resp));
-die();
+		//var_dump(base64_encode($resp));
 
 		$aOut = $this->parseSessionSetupResp($resp);
 var_dump('aOut');
@@ -325,15 +366,22 @@ die();
 			throw new Exception("Socket has gone away");
 			exit;
 		}
+//var_dump('transaction msg b64 ' . base64_encode($msg));
+//var_dump('transaction msg len' . strlen($msg));
 		$sent = socket_send($this->socket, $msg, strlen($msg), 0);
 		$data = socket_read($this->socket, 4);
-var_dump('transaction ' . base64_encode($data));
+//var_dump('transaction data4 b64 ' . base64_encode($data));
 		if ($data!==false) {
 			$length = $this->getTransportLength($data);
-var_dump('getTransportLength ' . $length);
+//var_dump('getTransportLength length ' . $length);
 			$data .= socket_read($this->socket, $length);
-var_dump('transaction ' . base64_encode($data));
+			# Response has three parts the first and the last are ever the same (if $msg is invariant) the central part always changes!
+			# first: AAAAzf9TTUJyAAAAAIAAyAAAAAAAAAAAAAAAAAAAAAAAAAAAEQAADzIAAQAEQQAAAAABAAAAAAD88wGA
+			# central: snitLlE
+			# last: E1gHE/wCIAB6iHa+rO2hHlEuUDUTl7itgdgYGKwYBBQUCoGwwaqA8MDoGCisGAQQBgjcCAh4GCSqGSIL3EgECAgYJKoZIhvcSAQICBgoqhkiG9xIBAgIDBgorBgEEAYI3AgIKoyowKKAmGyRub3RfZGVmaW5lZF9pbl9SRkM0MTc4QHBsZWFzZV9pZ25vcmU=
+
 		}
+var_dump('transaction data b64' . base64_encode($data));
 		return $data;
 	}
 
