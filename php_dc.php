@@ -50,7 +50,7 @@ class GSSAPI
 
 	private function parselen($berobj)
 	{
-var_dump(__METHOD__);
+#var_dump(__METHOD__);
 		$length = ord(substr($berobj, 1, 1));
 //var_dump("ord " . ord(substr($berobj, 1, 1)) . "\n");
 //var_dump("length " . $length . "\n");
@@ -82,7 +82,7 @@ var_dump(__METHOD__);
 
 	private function  parsetlv($dertype, $derobj, $partial=false)
 	{
-var_dump(__METHOD__);
+#var_dump(__METHOD__);
 #var_dump(base64_encode($derobj));
 		if (substr($derobj, 0, 1)!=$dertype) {
 			throw new Exception(printf('BER element %s does not start with type 0x%s.', bin2hex($derobj), bin2hex($dertype)));
@@ -111,13 +111,13 @@ var_dump(__METHOD__);
 
 	private function parseoctstr($payload, $partial=false)
 	{
-var_dump(__METHOD__);
+#var_dump(__METHOD__);
 		return $this->parsetlv("\x04", $payload, $partial);
 	}
 
 	private function parseint($payload, $partial=false, $tag="\x02")
 	{
-var_dump(__METHOD__);
+#var_dump(__METHOD__);
 	    	$res = $this->parsetlv($tag, $payload, $partial);
 	    	if ($partial) {
 			$payload = $res[0];
@@ -144,20 +144,20 @@ var_dump(__METHOD__);
 
 	private function parseenum($payload, $partial=false)
 	{
-var_dump(__METHOD__);
+#var_dump(__METHOD__);
 	    	return $this->parseint($payload, $partial, "\x0A");
 	}
 
 
 	private function parseseq($payload, $partial=false)
 	{
-var_dump(__METHOD__);
+#var_dump(__METHOD__);
 	    	return $this->parsetlv("\x30", $payload, $partial);
 	}
 
 	public function makeToken($ntlm_token, $type1=true)
 	{
-var_dump(__METHOD__);
+#var_dump(__METHOD__);
 		if (! $type1) {
 			$mechToken = $this->maketlv("\xa2", $this->makeoctstr($ntlm_token));
 			$negTokenResp = $this->maketlv("\xa1", $this->makeseq($mechToken));
@@ -192,7 +192,7 @@ var_dump(__METHOD__);
 
 	public function extractToken($msg)
 	{
-var_dump(__METHOD__);
+#var_dump(__METHOD__);
 		# Extract negTokenResp from NegotiationToken
 //var_dump(base64_encode($msg));
 		$msg = $this->parsetlv("\xa1", $msg, false);
@@ -234,7 +234,6 @@ var_dump(__METHOD__);
 
 class phpDB
 {
-	private $cache;
 	private $socket;
 	private $gssapi;
 	private $userId = 0;
@@ -258,13 +257,7 @@ class phpDB
 	{
 		$this->session_id = session_id();
 
-		$this->cache = new Redis();
-		$this->cache->connect('127.0.0.1', 6379);
-
 		$this->gssapi = new GSSAPI();
-
-var_dump($this->session_id);
-var_dump($this->cache->exists($this->session_id));
 
 		$this->socket = false;
 /*
@@ -274,9 +267,7 @@ var_dump('prendo in cache');
 		}
 */
 
-var_dump($this->socket);
 		if ($this->socket == false) {
-var_dump('nuovo');
 			$this->socket = socket_create(AF_INET, SOCK_STREAM, 0);
 			if (!$this->socket) {
 				throw new Exception("Unable to create socket to PDC");
@@ -290,18 +281,13 @@ var_dump('nuovo');
 			$timeout = array("sec"=>100,"usec"=>500000);
 			socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, $timeout);
 
-			$this->cache->set('staminkia' . $this->session_id, $this->socket);
 		}
-var_dump($this->socket);
 	}
 
 	public function __destruct() 
 	{
-		//if ($this->socket) {
-			//$this->socket->close();
-		//}
-		if ($this->cache) {
-			$this->cache->close();
+		if ($this->socket) {
+			$this->socket->close();
 		}
 	}
 
@@ -319,13 +305,13 @@ var_dump($this->socket);
 
  	private function parseSessionSetupResp($resp)
 	{
-var_dump(__METHOD__);
+##var_dump(__METHOD__);
 		$smb_data = $this->removeTransport($resp);
-var_dump('smb_data ' . base64_encode($smb_data)); 
+##var_dump('smb_data ' . base64_encode($smb_data)); 
 		$hdr = substr($smb_data, 0, self::SMB_Header_Length);
-var_dump('hdr ' . base64_encode($hdr));
+#var_dump('hdr ' . base64_encode($hdr));
 		$msg = substr($smb_data, self::SMB_Header_Length);
-var_dump('msg ' . base64_encode($msg));
+#var_dump('msg ' . base64_encode($msg));
 
 		# <I little-endian unsigned int
 		$status = unpack('V', substr($hdr, 5, 4))[1];
@@ -359,6 +345,42 @@ var_dump('msg ' . base64_encode($msg));
 		$aRv =  [true, $this->gssapi->extractToken($blob)];
 #var_dump('token ' . base64_encode($aRv));
 		return $aRv;
+	}
+
+
+	private function authenticate($ntlm_authenticate)
+	{
+		$msg = $this->makeSessionSetupRequest($ntlm_authenticate, false);
+#var_dump('PD');
+		$msg = $this->transaction($msg);
+		return $this->parseSessionSetupResp($msg)[0];
+	}
+
+	public function handleType3($ntlm_message)
+	{
+        	$result = $this->authenticate($ntlm_message);
+#var_dump($result);
+		die();
+    		#except Exception, e:
+        		#req.log_error('PYNTLM: Error when retrieving Type 3 message from server = %s' % str(e), apache.APLOG_CRIT)
+        		#user, domain = 'invalid', 'invalid'
+        		#result = False
+    		#if not result:
+        		#cache.remove(req.connection.id)
+        		#req.log_error('PYNTLM: User %s/%s authentication for URI %s' % (
+            			#domain,user,req.unparsed_uri))
+        		#return handle_unauthorized(req)
+
+		#req.log_error('PYNTLM: User %s/%s has been authenticated to access URI %s' % (user,domain,req.unparsed_uri), apache.APLOG_NOTICE)
+		#set_remote_user(req, user, domain)
+		#result = check_authorization(req, user, proxy)
+		#cache.remove(req.connection.id)
+
+    		#if not result:
+        		#return apache.HTTP_FORBIDDEN
+
+    		#req.connection.notes.add('NTLM_AUTHORIZED',req.user)
+    		#return apache.OK
 	}
 
 	public function negotiate($data)
@@ -416,7 +438,7 @@ var_dump('msg ' . base64_encode($msg));
 			# last: E1gHE/wCIAB6iHa+rO2hHlEuUDUTl7itgdgYGKwYBBQUCoGwwaqA8MDoGCisGAQQBgjcCAh4GCSqGSIL3EgECAgYJKoZIhvcSAQICBgoqhkiG9xIBAgIDBgorBgEEAYI3AgIKoyowKKAmGyRub3RfZGVmaW5lZF9pbl9SRkM0MTc4QHBsZWFzZV9pZ25vcmU=
 
 		}
-var_dump('transaction data b64' . base64_encode($data));
+#var_dump('transaction data b64' . base64_encode($data));
 		return $data;
 	}
 
@@ -531,7 +553,11 @@ if (substr($auth,0,5) == "NTLM ") {
 	}
 	if ($msg[8] == "\x01") {
 		$a = new phpDB();
+
+
 		$challenge = $a->negotiate($msg);
+
+die(base64_encode($challenge));
 
 		header("HTTP/1.1 401 Unauthorized");
 		header("WWW-Authenticate: NTLM ".trim(base64_encode($challenge)));
@@ -539,6 +565,8 @@ if (substr($auth,0,5) == "NTLM ") {
   	}
   	else if ($msg[8] == "\x03") {
 		$a = new phpDB();
+		$a->handleType3($msg);
+
 		function get_msg_str($msg, $start, $unicode = true) {
 			$len = (ord($msg[$start+1]) * 256) + ord($msg[$start]);
 			$off = (ord($msg[$start+5]) * 256) + ord($msg[$start+4]);
